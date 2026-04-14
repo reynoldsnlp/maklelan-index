@@ -17,7 +17,7 @@ straight there on YouTube.
 ## How it works
 
 1. `scraper/scrape.py` fetches the channel's video list and downloads transcripts (closed captions)
-   from YouTube using only `requests` from the Python standard toolset.
+   from YouTube using the `innertube` library for reliable API access and `requests` for caption XML.
 2. `scraper/bible_books.py` parses transcripts for scripture references using regex.
 3. The index is written to `docs/data/` as JSON files and committed to the repository.
 4. GitHub Actions runs the scraper every Sunday and on manual dispatch.
