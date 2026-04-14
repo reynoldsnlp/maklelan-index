@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+        content="Searchable scripture reference index for Dan McClellan's (@maklelan) YouTube videos." />
+  <title>McClellan Scripture Index</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<header>
+  <h1>📖 McClellan Scripture Index</h1>
+  <p>
+    Search Dan McClellan's
+    (<a href="https://www.youtube.com/@maklelan" target="_blank" rel="noopener">@maklelan</a>)
+    YouTube videos by scripture reference
+  </p>
+</header>
+
+<main>
+  <!-- Search box – stays sticky at the top while scrolling -->
+  <section class="search-section" aria-label="Scripture search">
+    <label for="search-input" class="sr-only">Search scripture references</label>
+    <input
+      type="search"
+      id="search-input"
+      placeholder="e.g. Genesis 1:1 · John 3:16 · 1 Cor 15 · Romans 8"
+      autocomplete="off"
+      spellcheck="false"
+      aria-label="Search scripture references"
+    />
+  </section>
+
+  <section id="results" aria-live="polite" aria-label="Search results">
+    <p id="stats" aria-live="polite"></p>
+    <div id="results-list"></div>
+  </section>
+</main>
+
+<footer>
+  <p>
+    Index last updated: <span id="updated">—</span> &nbsp;|&nbsp;
+    Source: <a href="https://www.youtube.com/@maklelan" target="_blank" rel="noopener">Dan McClellan's YouTube channel</a>
+    &nbsp;|&nbsp;
+    <a href="https://github.com/reynoldsnlp/maklelan-index" target="_blank" rel="noopener">GitHub</a>
+  </p>
+</footer>
+
+<!-- Visually hidden helper for screen-reader labels -->
+<style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>
+
+<script src="js/app.js"></script>
+</body>
+</html>

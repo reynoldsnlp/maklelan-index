@@ -1,0 +1,193 @@
+/* ── Reset & base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #f8f7f2;
+  --surface:  #ffffff;
+  --primary:  #3b6fa0;
+  --primary-dark: #2c5480;
+  --accent:   #c0392b;
+  --text:     #222222;
+  --muted:    #666666;
+  --border:   #ddd;
+  --radius:   8px;
+  --shadow:   0 2px 8px rgba(0,0,0,.10);
+  --max-w:    860px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ────────────────────────────────────────────────────── */
+header {
+  background: var(--primary);
+  color: #fff;
+  padding: 2rem 1rem 1.5rem;
+  text-align: center;
+}
+
+header h1 {
+  font-size: clamp(1.4rem, 4vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -.5px;
+  margin-bottom: .4rem;
+}
+
+header p {
+  font-size: .95rem;
+  opacity: .88;
+}
+
+header p a { color: #aed6f1; }
+
+/* ── Main content ──────────────────────────────────────────────── */
+main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+/* ── Search box ────────────────────────────────────────────────── */
+.search-section {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: 1rem 0 .75rem;
+}
+
+#search-input {
+  width: 100%;
+  padding: .75rem 1rem;
+  font-size: 1.05rem;
+  border: 2px solid var(--primary);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--surface);
+  transition: box-shadow .2s;
+}
+
+#search-input:focus {
+  box-shadow: 0 0 0 3px rgba(59,111,160,.25);
+}
+
+/* ── Stats bar ─────────────────────────────────────────────────── */
+#stats {
+  font-size: .85rem;
+  color: var(--muted);
+  margin-bottom: 1rem;
+  min-height: 1.2em;
+}
+
+/* ── Reference group card ──────────────────────────────────────── */
+.ref-group {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.ref-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+  padding: .75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: #f0f5fb;
+}
+
+.ref-entries { padding: .5rem 0; }
+
+/* ── Individual video entry ────────────────────────────────────── */
+.entry { border-bottom: 1px solid var(--border); }
+.entry:last-child { border-bottom: none; }
+
+.video-link {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: .75rem 1rem;
+  text-decoration: none;
+  color: inherit;
+  transition: background .15s;
+}
+
+.video-link:hover { background: #f0f5fb; }
+
+.thumbnail {
+  width: 120px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.entry-info {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  min-width: 0;
+}
+
+.video-title {
+  font-weight: 600;
+  font-size: .95rem;
+  color: var(--primary-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timestamp {
+  font-size: .8rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.snippet {
+  font-size: .82rem;
+  color: var(--muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Feedback messages ─────────────────────────────────────────── */
+.no-results, .error, .hint {
+  padding: 1.5rem 1rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: .95rem;
+}
+
+.error { color: var(--accent); }
+
+/* ── Footer ────────────────────────────────────────────────────── */
+footer {
+  background: #222;
+  color: #aaa;
+  font-size: .8rem;
+  text-align: center;
+  padding: .9rem 1rem;
+}
+
+footer a { color: #aed6f1; }
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 500px) {
+  .thumbnail { width: 80px; height: 45px; }
+  .video-title { font-size: .88rem; }
+}
