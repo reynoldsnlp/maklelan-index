@@ -33,8 +33,8 @@ straight there on YouTube.
 ## Local development
 
 ```bash
-pip install -r scraper/requirements.txt
-python scraper/scrape.py
+uv sync
+uv run python scraper/scrape.py
 ```
 
 The generated data lands in `docs/data/`.
