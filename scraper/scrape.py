@@ -179,7 +179,9 @@ def _extract_from_item(item: dict) -> tuple[dict | None, str | None]:
     cont = item.get("continuationItemRenderer", {})
     if cont:
         try:
-            token = cont["continuationEndpoint"]["continuationCommand"]["token"]
+            token = (
+                cont["continuationEndpoint"]["continuationCommand"]["token"]
+            )
         except (KeyError, TypeError):
             pass
 
