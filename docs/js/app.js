@@ -41,7 +41,7 @@ async function init() {
     return;
   }
 
-  allRefs = Object.keys(indexData.references).sort(refSort);
+  allRefs = Object.keys(indexData.references).sort(compareScriptureRefs);
 
   const refCount = allRefs.length;
   const vidCount = Object.keys(videosData.videos).length;
@@ -180,37 +180,29 @@ function esc(str) {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Sort canonical scripture references in canonical Bible order.
- * Falls back to locale string comparison for unknown books.
- */
-const BOOK_ORDER = [
-  "Genesis","Exodus","Leviticus","Numbers","Deuteronomy",
-  "Joshua","Judges","Ruth",
-  "1 Samuel","2 Samuel","1 Kings","2 Kings",
-  "1 Chronicles","2 Chronicles",
-  "Ezra","Nehemiah","Esther","Job","Psalms","Proverbs",
-  "Ecclesiastes","Song of Solomon",
-  "Isaiah","Jeremiah","Lamentations","Ezekiel","Daniel",
-  "Hosea","Joel","Amos","Obadiah","Jonah","Micah",
-  "Nahum","Habakkuk","Zephaniah","Haggai","Zechariah","Malachi",
-  "Matthew","Mark","Luke","John","Acts","Romans",
-  "1 Corinthians","2 Corinthians","Galatians","Ephesians",
-  "Philippians","Colossians",
-  "1 Thessalonians","2 Thessalonians",
-  "1 Timothy","2 Timothy","Titus","Philemon",
-  "Hebrews","James",
-  "1 Peter","2 Peter",
-  "1 John","2 John","3 John","Jude","Revelation",
-];
-
-/** @param {string} ref */
-function refSort(a, b) {
+/** Comparison function for sorting canonical scripture references in Bible order. */
+function compareScriptureRefs(a, b) {
+  const BOOK_ORDER = [
+    "Genesis","Exodus","Leviticus","Numbers","Deuteronomy",
+    "Joshua","Judges","Ruth",
+    "1 Samuel","2 Samuel","1 Kings","2 Kings",
+    "1 Chronicles","2 Chronicles",
+    "Ezra","Nehemiah","Esther","Job","Psalms","Proverbs",
+    "Ecclesiastes","Song of Solomon",
+    "Isaiah","Jeremiah","Lamentations","Ezekiel","Daniel",
+    "Hosea","Joel","Amos","Obadiah","Jonah","Micah",
+    "Nahum","Habakkuk","Zephaniah","Haggai","Zechariah","Malachi",
+    "Matthew","Mark","Luke","John","Acts","Romans",
+    "1 Corinthians","2 Corinthians","Galatians","Ephesians",
+    "Philippians","Colossians",
+    "1 Thessalonians","2 Thessalonians",
+    "1 Timothy","2 Timothy","Titus","Philemon",
+    "Hebrews","James",
+    "1 Peter","2 Peter",
+    "1 John","2 John","3 John","Jude","Revelation",
+  ];
   // e.g. "Romans 8:28" → book="Romans", rest="8:28"
   const parse = (r) => {
-    const spaceIdx = r.lastIndexOf(" ");
-    // Handle multi-word book names like "1 Corinthians"
-    // Find the first numeric char after the book portion
     const m = r.match(/^(.+?)\s+(\d+:\d+(?:-\d+)?)$/);
     if (!m) return { bookIdx: 999, rest: r };
     const bookIdx = BOOK_ORDER.indexOf(m[1]);

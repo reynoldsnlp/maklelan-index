@@ -499,7 +499,7 @@ def main() -> None:
 
     # ── 2. Paginate through all videos ──────────────────────────────────────
     page = 1
-    while continuation and page < 30:  # safety cap ~900 videos
+    while continuation and page < 30:  # safety cap: 30 pages × ~30 videos/page ≈ 900 videos
         time.sleep(1.0)
         print(f"  Fetching page {page + 1} …", flush=True)
         more, continuation = fetch_continuation_videos(session, continuation, api_key)
