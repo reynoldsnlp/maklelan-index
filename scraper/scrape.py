@@ -81,7 +81,7 @@ TRANSCRIPT_DIR = _REPO_ROOT / "data" / "transcripts"
 MAX_VIDEOS_PER_RUN = 100
 
 # InnerTube client types to try in order when fetching player data
-_PLAYER_CLIENT_TYPES = ["WEB", "ANDROID", "TV_EMBED"]
+_PLAYER_CLIENT_TYPES = ["WEB", "ANDROID", "TVHTML5"]
 
 # ---------------------------------------------------------------------------
 # HTTP session
