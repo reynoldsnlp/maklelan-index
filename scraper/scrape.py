@@ -35,6 +35,7 @@ Workflow
 from __future__ import annotations
 
 import json
+import random
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -81,6 +82,16 @@ TRANSCRIPT_DIR = _REPO_ROOT / "data" / "transcripts"
 # Maximum number of videos to process (fetch transcript for) in a single run
 MAX_VIDEOS_PER_RUN = 100
 
+# Rate-limiting defaults (seconds)
+_DELAY_BETWEEN_PAGES = 2.0        # between channel pagination requests
+_DELAY_BETWEEN_VIDEOS = 5.0       # between per-video transcript fetches
+_DELAY_BETWEEN_FALLBACKS = 2.0    # between fallback attempts within one video
+_DELAY_AFTER_FAILURE = 10.0       # extra pause after a failed request
+_JITTER_FRACTION = 0.5            # ±50 % randomisation on every delay
+
+# Stop processing after this many consecutive transcript failures (likely IP ban)
+_MAX_CONSECUTIVE_FAILURES = 5
+
 # InnerTube client types to try in order when fetching player data
 _PLAYER_CLIENT_TYPES = ["WEB", "ANDROID", "TVHTML5"]
 
@@ -93,6 +104,24 @@ def _make_session() -> requests.Session:
     s = requests.Session()
     s.headers.update(HEADERS)
     return s
+
+
+# ---------------------------------------------------------------------------
+# Rate-limiting helper
+# ---------------------------------------------------------------------------
+
+
+def _polite_sleep(base: float, *, consecutive_failures: int = 0) -> None:
+    """Sleep for *base* seconds ± jitter, with exponential back-off on failures.
+
+    Each consecutive failure doubles the delay (capped at 120 s).
+    """
+    delay = base * (2 ** min(consecutive_failures, 5))  # cap at 2^5 = 32×
+    delay = min(delay, 120.0)
+    jitter = delay * _JITTER_FRACTION
+    actual = delay + random.uniform(-jitter, jitter)
+    actual = max(0.5, actual)  # never sleep less than 0.5 s
+    time.sleep(actual)
 
 
 # ---------------------------------------------------------------------------
@@ -316,14 +345,20 @@ def fetch_all_videos(
     print(f"  {len(all_videos)} videos on first page.", flush=True)
 
     page = 1
+    page_failures = 0
     while continuation:
-        time.sleep(1.0)
+        _polite_sleep(_DELAY_BETWEEN_PAGES, consecutive_failures=page_failures)
         print(f"  Fetching page {page + 1} …", flush=True)
         try:
             data = innertube_client.browse(continuation=continuation)
+            page_failures = 0
         except Exception as exc:
+            page_failures += 1
             print(f"  Continuation request failed: {exc}", flush=True)
-            break
+            if page_failures >= 3:
+                print("  Too many consecutive page failures – stopping pagination.", flush=True)
+                break
+            continue
 
         more, continuation = _items_from_continuation_response(data)
         if not more and not continuation:
@@ -478,6 +513,7 @@ def fetch_transcript(
             return transcript
     except Exception as exc:
         print(f"  youtube-transcript-api failed: {exc}", flush=True)
+        _polite_sleep(_DELAY_BETWEEN_FALLBACKS)
 
     # 3. Try multiple InnerTube client types
     for client_type, client in innertube_clients:
@@ -489,9 +525,11 @@ def fetch_transcript(
                 break
         except Exception as exc:
             print(f"  innertube player({client_type}) failed: {exc}", flush=True)
+        _polite_sleep(_DELAY_BETWEEN_FALLBACKS)
 
     # 4. Fallback: watch-page HTML
     if not caption_url:
+        _polite_sleep(_DELAY_BETWEEN_FALLBACKS)
         try:
             resp = session.get(
                 f"https://www.youtube.com/watch?v={video_id}",
@@ -513,6 +551,7 @@ def fetch_transcript(
     if not caption_url:
         return []
 
+    _polite_sleep(_DELAY_BETWEEN_FALLBACKS)
     try:
         xml_resp = session.get(caption_url, timeout=30)
         xml_resp.raise_for_status()
@@ -713,6 +752,7 @@ def main() -> None:
     print(f"Videos to process / retry: {len(to_process)}", flush=True)
 
     # ── 4. Process each video that is not yet verifiably complete ─────────────
+    consecutive_failures = 0
     for i, video in enumerate(to_process, 1):
         vid_id = video["id"]
         vid_record = videos_data["videos"][vid_id]
@@ -723,11 +763,24 @@ def main() -> None:
 
         transcript = fetch_transcript(session, innertube_clients, vid_id, yt_api=yt_api)
         if not transcript:
-            print("  No transcript – marking failed.", flush=True)
+            consecutive_failures += 1
+            print(
+                f"  No transcript – marking failed "
+                f"({consecutive_failures}/{_MAX_CONSECUTIVE_FAILURES} consecutive).",
+                flush=True,
+            )
             vid_record["processed"] = STATUS_FAILED
-            time.sleep(0.75)
+            if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                print(
+                    f"\n⚠ {_MAX_CONSECUTIVE_FAILURES} consecutive failures – "
+                    f"likely IP-blocked. Stopping early to preserve progress.",
+                    flush=True,
+                )
+                break
+            _polite_sleep(_DELAY_AFTER_FAILURE, consecutive_failures=consecutive_failures)
             continue
 
+        consecutive_failures = 0
         print(f"  Transcript: {len(transcript)} segments", flush=True)
         refs = refs_from_transcript(transcript)
         print(f"  Found {len(refs)} scripture reference occurrences", flush=True)
@@ -757,7 +810,7 @@ def main() -> None:
             )
             vid_record["processed"] = STATUS_NO_REFS
 
-        time.sleep(0.75)  # polite delay between video requests
+        _polite_sleep(_DELAY_BETWEEN_VIDEOS)
 
     # ── 5. Persist ───────────────────────────────────────────────────────────
     save_data(index, videos_data)
