@@ -44,6 +44,7 @@ from pathlib import Path
 
 import requests
 from innertube import InnerTube
+from youtube_transcript_api import YouTubeTranscriptApi
 
 # ---------------------------------------------------------------------------
 # Import the scripture-reference parser from the sibling module
@@ -448,12 +449,15 @@ def fetch_transcript(
     session: requests.Session,
     innertube_clients: list[tuple[str, InnerTube]],
     video_id: str,
+    *,
+    yt_api: YouTubeTranscriptApi,
 ) -> list[dict]:
     """Fetch the English transcript for *video_id*.
 
     1. Return from local cache (``data/transcripts/``) if available.
-    2. Try each InnerTube client type in *innertube_clients* via ``player()``.
-    3. Fall back to scraping the watch-page HTML for ``ytInitialPlayerResponse``
+    2. Try ``youtube-transcript-api`` (most reliable, actively maintained).
+    3. Try each InnerTube client type in *innertube_clients* via ``player()``.
+    4. Fall back to scraping the watch-page HTML for ``ytInitialPlayerResponse``
        and, if that fails, a direct ``"captionTracks"`` string search.
     Returns an empty list if no English captions are available.
     Saves a successful transcript to the local cache.
@@ -465,7 +469,17 @@ def fetch_transcript(
 
     caption_url: str | None = None
 
-    # 2. Try multiple InnerTube client types
+    # 2. Try youtube-transcript-api (most reliable, actively maintained)
+    try:
+        fetched = yt_api.fetch(video_id, languages=("en", "en-US", "en-GB"))
+        transcript = [{"start": seg.start, "dur": seg.duration, "text": seg.text} for seg in fetched]
+        if transcript:
+            _save_transcript(video_id, transcript)
+            return transcript
+    except Exception as exc:
+        print(f"  youtube-transcript-api failed: {exc}", flush=True)
+
+    # 3. Try multiple InnerTube client types
     for client_type, client in innertube_clients:
         try:
             player_data = client.player(video_id)
@@ -476,7 +490,7 @@ def fetch_transcript(
         except Exception as exc:
             print(f"  innertube player({client_type}) failed: {exc}", flush=True)
 
-    # 3. Fallback: watch-page HTML
+    # 4. Fallback: watch-page HTML
     if not caption_url:
         try:
             resp = session.get(
@@ -648,37 +662,54 @@ def main() -> None:
     innertube_clients: list[tuple[str, InnerTube]] = [
         (t, InnerTube(t)) for t in _PLAYER_CLIENT_TYPES
     ]
+    yt_api = YouTubeTranscriptApi()
     index, videos_data = load_data()
 
     # ── 1 & 2. Fetch all channel videos (initial page + continuations) ───────
-    all_videos = fetch_all_videos(session, innertube_client)
-
-    # ── 3. Update video metadata, preserving existing processed status ────────
-    for v in all_videos:
-        vid_id = v["id"]
-        existing = videos_data.setdefault("videos", {}).get(vid_id, {})
-        videos_data["videos"][vid_id] = {
-            "id": vid_id,
-            "title": v["title"],
-            "published": v["published"],
-            "thumbnail": v["thumbnail"],
-            "duration": v["duration"],
-            "url": v["url"],
-            # Preserve existing status; new videos start as not_attempted
-            "processed": existing.get("processed", STATUS_NOT_ATTEMPTED),
-        }
-
-    to_process = [
-        v for v in all_videos
-        if videos_data["videos"][v["id"]].get("processed") != STATUS_YES
+    # Skip the channel fetch if there are already enough cached videos that
+    # still need transcript processing – avoids a slow full-channel scrape when
+    # we already have a full batch of pending work.
+    pending_videos = [
+        rec for rec in videos_data.get("videos", {}).values()
+        if rec.get("processed") in (STATUS_NOT_ATTEMPTED, STATUS_FAILED)
     ]
-    if len(to_process) > MAX_VIDEOS_PER_RUN:
+    if len(pending_videos) >= MAX_VIDEOS_PER_RUN:
         print(
-            f"Capping to {MAX_VIDEOS_PER_RUN} videos this run "
-            f"({len(to_process)} pending).",
+            f"Skipping channel fetch: {len(pending_videos)} cached videos "
+            f"still need transcripts (>= {MAX_VIDEOS_PER_RUN}).",
             flush=True,
         )
-        to_process = to_process[:MAX_VIDEOS_PER_RUN]
+        to_process = pending_videos[:MAX_VIDEOS_PER_RUN]
+    else:
+        all_videos = fetch_all_videos(session, innertube_client)
+
+        # ── 3. Update video metadata, preserving existing processed status ────
+        for v in all_videos:
+            vid_id = v["id"]
+            existing = videos_data.setdefault("videos", {}).get(vid_id, {})
+            videos_data["videos"][vid_id] = {
+                "id": vid_id,
+                "title": v["title"],
+                "published": v["published"],
+                "thumbnail": v["thumbnail"],
+                "duration": v["duration"],
+                "url": v["url"],
+                # Preserve existing status; new videos start as not_attempted
+                "processed": existing.get("processed", STATUS_NOT_ATTEMPTED),
+            }
+
+        to_process = [
+            videos_data["videos"][v["id"]] for v in all_videos
+            if videos_data["videos"][v["id"]].get("processed") not in (STATUS_YES, STATUS_NO_REFS)
+        ]
+        if len(to_process) > MAX_VIDEOS_PER_RUN:
+            print(
+                f"Capping to {MAX_VIDEOS_PER_RUN} videos this run "
+                f"({len(to_process)} pending).",
+                flush=True,
+            )
+            to_process = to_process[:MAX_VIDEOS_PER_RUN]
+
     print(f"Videos to process / retry: {len(to_process)}", flush=True)
 
     # ── 4. Process each video that is not yet verifiably complete ─────────────
@@ -690,7 +721,7 @@ def main() -> None:
             flush=True,
         )
 
-        transcript = fetch_transcript(session, innertube_clients, vid_id)
+        transcript = fetch_transcript(session, innertube_clients, vid_id, yt_api=yt_api)
         if not transcript:
             print("  No transcript – marking failed.", flush=True)
             vid_record["processed"] = STATUS_FAILED
