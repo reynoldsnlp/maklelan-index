@@ -75,6 +75,13 @@ STATUS_FAILED = "failed"
 # Paths
 _REPO_ROOT = Path(__file__).parent.parent
 DATA_DIR = _REPO_ROOT / "docs" / "data"
+TRANSCRIPT_DIR = _REPO_ROOT / "data" / "transcripts"
+
+# Maximum number of videos to process (fetch transcript for) in a single run
+MAX_VIDEOS_PER_RUN = 100
+
+# InnerTube client types to try in order when fetching player data
+_PLAYER_CLIENT_TYPES = ["WEB", "ANDROID", "TV_EMBED"]
 
 # ---------------------------------------------------------------------------
 # HTTP session
@@ -110,6 +117,19 @@ def _raw_decode_at(text: str, marker: str) -> dict | None:
 def extract_yt_initial_data(html: str) -> dict | None:
     """Extract the ``ytInitialData`` JSON object embedded in a YouTube page."""
     for marker in ("var ytInitialData = ", 'window["ytInitialData"] = ', "ytInitialData = "):
+        obj = _raw_decode_at(html, marker)
+        if obj:
+            return obj
+    return None
+
+
+def extract_yt_initial_player_response(html: str) -> dict | None:
+    """Extract the ``ytInitialPlayerResponse`` JSON object embedded in a YouTube watch page."""
+    for marker in (
+        "var ytInitialPlayerResponse = ",
+        'window["ytInitialPlayerResponse"] = ',
+        "ytInitialPlayerResponse = ",
+    ):
         obj = _raw_decode_at(html, marker)
         if obj:
             return obj
@@ -401,27 +421,62 @@ def parse_transcript_xml(xml_text: str) -> list[dict]:
     return segments
 
 
+def _load_cached_transcript(video_id: str) -> list[dict] | None:
+    """Return the cached transcript for *video_id*, or ``None`` if not cached."""
+    path = TRANSCRIPT_DIR / f"{video_id}.json"
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            print(f"  Warning: could not read cached transcript for {video_id}: {exc}", flush=True)
+    return None
+
+
+def _save_transcript(video_id: str, transcript: list[dict]) -> None:
+    """Persist *transcript* for *video_id* to ``data/transcripts/``."""
+    TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+    path = TRANSCRIPT_DIR / f"{video_id}.json"
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(transcript, f, ensure_ascii=False)
+    except Exception as exc:
+        print(f"  Warning: could not cache transcript: {exc}", flush=True)
+
+
 def fetch_transcript(
     session: requests.Session,
-    innertube_client: InnerTube,
+    innertube_clients: list[tuple[str, InnerTube]],
     video_id: str,
 ) -> list[dict]:
     """Fetch the English transcript for *video_id*.
 
-    Tries innertube's ``player()`` first (most reliable), then falls back to
-    scraping the watch-page HTML for the caption track URL.
+    1. Return from local cache (``data/transcripts/``) if available.
+    2. Try each InnerTube client type in *innertube_clients* via ``player()``.
+    3. Fall back to scraping the watch-page HTML for ``ytInitialPlayerResponse``
+       and, if that fails, a direct ``"captionTracks"`` string search.
     Returns an empty list if no English captions are available.
+    Saves a successful transcript to the local cache.
     """
+    # 1. Cache hit
+    cached = _load_cached_transcript(video_id)
+    if cached is not None:
+        return cached
+
     caption_url: str | None = None
 
-    # Primary: innertube player API
-    try:
-        player_data = innertube_client.player(video_id)
-        caption_url = _caption_url_from_player_response(player_data)
-    except Exception as exc:
-        print(f"  innertube player() failed: {exc}", flush=True)
+    # 2. Try multiple InnerTube client types
+    for client_type, client in innertube_clients:
+        try:
+            player_data = client.player(video_id)
+            caption_url = _caption_url_from_player_response(player_data)
+            if caption_url:
+                print(f"  Caption URL found via InnerTube({client_type})", flush=True)
+                break
+        except Exception as exc:
+            print(f"  innertube player({client_type}) failed: {exc}", flush=True)
 
-    # Fallback: watch-page HTML scrape
+    # 3. Fallback: watch-page HTML
     if not caption_url:
         try:
             resp = session.get(
@@ -429,7 +484,15 @@ def fetch_transcript(
                 timeout=30,
             )
             resp.raise_for_status()
-            caption_url = _caption_url_from_watch_page(resp.text)
+            # Try ytInitialPlayerResponse first (most reliable)
+            player_response = extract_yt_initial_player_response(resp.text)
+            if player_response:
+                caption_url = _caption_url_from_player_response(player_response)
+            # Then try direct captionTracks search in raw HTML
+            if not caption_url:
+                caption_url = _caption_url_from_watch_page(resp.text)
+            if caption_url:
+                print("  Caption URL found via watch-page fallback", flush=True)
         except Exception as exc:
             print(f"  Could not fetch watch page: {exc}", flush=True)
 
@@ -439,7 +502,10 @@ def fetch_transcript(
     try:
         xml_resp = session.get(caption_url, timeout=30)
         xml_resp.raise_for_status()
-        return parse_transcript_xml(xml_resp.text)
+        transcript = parse_transcript_xml(xml_resp.text)
+        if transcript:
+            _save_transcript(video_id, transcript)
+        return transcript
     except Exception as exc:
         print(f"  Could not fetch transcript XML: {exc}", flush=True)
         return []
@@ -578,6 +644,10 @@ def main() -> None:
     print(f"Scraping {CHANNEL_URL}", flush=True)
     session = _make_session()
     innertube_client = InnerTube("WEB")
+    # Create one client per type up front so we reuse them across all videos
+    innertube_clients: list[tuple[str, InnerTube]] = [
+        (t, InnerTube(t)) for t in _PLAYER_CLIENT_TYPES
+    ]
     index, videos_data = load_data()
 
     # ── 1 & 2. Fetch all channel videos (initial page + continuations) ───────
@@ -602,6 +672,13 @@ def main() -> None:
         v for v in all_videos
         if videos_data["videos"][v["id"]].get("processed") != STATUS_YES
     ]
+    if len(to_process) > MAX_VIDEOS_PER_RUN:
+        print(
+            f"Capping to {MAX_VIDEOS_PER_RUN} videos this run "
+            f"({len(to_process)} pending).",
+            flush=True,
+        )
+        to_process = to_process[:MAX_VIDEOS_PER_RUN]
     print(f"Videos to process / retry: {len(to_process)}", flush=True)
 
     # ── 4. Process each video that is not yet verifiably complete ─────────────
@@ -613,7 +690,7 @@ def main() -> None:
             flush=True,
         )
 
-        transcript = fetch_transcript(session, innertube_client, vid_id)
+        transcript = fetch_transcript(session, innertube_clients, vid_id)
         if not transcript:
             print("  No transcript – marking failed.", flush=True)
             vid_record["processed"] = STATUS_FAILED
