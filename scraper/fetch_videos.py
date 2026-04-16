@@ -11,6 +11,7 @@ Usage::
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -34,6 +35,17 @@ from common import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # Video list extraction
 # ---------------------------------------------------------------------------
+
+
+def _parse_short_view_count(text: str) -> int:
+    """Parse short view counts like '123K views' or '1.2M views' into integers."""
+    m = re.match(r"([\d.]+)\s*([KMB]?)", text, re.IGNORECASE)
+    if not m:
+        return 0
+    num = float(m.group(1))
+    suffix = m.group(2).upper()
+    multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get(suffix, 1)
+    return int(num * multiplier)
 
 
 def _video_from_renderer(renderer: dict) -> dict | None:
@@ -69,6 +81,17 @@ def _video_from_renderer(renderer: dict) -> dict | None:
     except (KeyError, TypeError):
         pass
 
+    view_count = 0
+    try:
+        vct = renderer["viewCountText"]["simpleText"]  # e.g. "123,456 views"
+        view_count = int(re.sub(r"[^\d]", "", vct))
+    except (KeyError, TypeError, ValueError):
+        try:
+            vct = renderer["shortViewCountText"]["simpleText"]  # e.g. "123K views"
+            view_count = _parse_short_view_count(vct)
+        except (KeyError, TypeError, ValueError):
+            pass
+
     return {
         "id": video_id,
         "title": title,
@@ -76,6 +99,7 @@ def _video_from_renderer(renderer: dict) -> dict | None:
         "thumbnail": thumbnail,
         "duration": duration,
         "url": f"https://www.youtube.com/watch?v={video_id}",
+        "view_count": view_count,
     }
 
 
@@ -236,9 +260,11 @@ def main() -> None:
             "id": vid_id,
             "title": v["title"],
             "published": v["published"],
+            "published_date": existing.get("published_date", ""),
             "thumbnail": v["thumbnail"],
             "duration": v["duration"],
             "url": v["url"],
+            "view_count": v.get("view_count", existing.get("view_count", 0)),
             "processed": existing.get("processed", STATUS_NOT_ATTEMPTED),
         }
 

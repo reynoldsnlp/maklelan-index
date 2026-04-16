@@ -3,6 +3,8 @@
  *
  * Loads docs/data/index.json and docs/data/videos.json then provides
  * a live-search interface keyed by scripture reference.
+ * Results are video-centric: each video appears once with all matching
+ * scripture hits listed inside it.
  */
 
 /* ── State ─────────────────────────────────────────────────────── */
@@ -10,11 +12,17 @@
 /** @type {{ updated: string|null, references: Record<string, Array<{video_id:string, timestamp:number, snippet:string}>> } | null} */
 let indexData = null;
 
-/** @type {{ videos: Record<string, {id:string, title:string, published:string, thumbnail:string, duration:string, url:string}> } | null} */
+/** @type {{ videos: Record<string, {id:string, title:string, published:string, published_date:string, thumbnail:string, duration:string, url:string, view_count:number}> } | null} */
 let videosData = null;
 
 /** Sorted list of all canonical references (for quick filtering) */
 let allRefs = [];
+
+/** Current sort mode */
+let currentSort = "relevance";
+
+/** Last query string (for re-sorting without re-filtering) */
+let lastQuery = "";
 
 /* ── Bootstrap ─────────────────────────────────────────────────── */
 
@@ -68,6 +76,14 @@ async function init() {
   // Attach search listener
   const input = document.getElementById("search-input");
   input.addEventListener("input", () => render(input.value));
+
+  // Attach sort listener
+  const sortSelect = document.getElementById("sort-select");
+  sortSelect.addEventListener("change", () => {
+    currentSort = sortSelect.value;
+    render(lastQuery);
+  });
+
   input.focus();
 
   // Show hint on empty state
@@ -132,15 +148,18 @@ function refMatchesQuery(ref, q) {
 }
 
 /**
- * Filter allRefs to those matching *query* and render results.
+ * Collect matching refs, group all hits by video, sort, and render.
  * @param {string} query
  */
 function render(query) {
+  lastQuery = query;
   const q = query.trim().toLowerCase();
   const container = document.getElementById("results-list");
+  const sortControls = document.getElementById("sort-controls");
 
   if (!q) {
     container.innerHTML = `<p class="hint">Start typing a book name, chapter, or verse above.</p>`;
+    sortControls.classList.add("hidden");
     return;
   }
 
@@ -151,62 +170,140 @@ function render(query) {
 
   if (matched.length === 0) {
     container.innerHTML = `<p class="no-results">No results for <strong>${esc(query)}</strong>.</p>`;
+    sortControls.classList.add("hidden");
     return;
   }
 
-  const limit = 200; // avoid painting thousands of cards at once
-  const shown = matched.slice(0, limit);
-  const html = shown.map(buildRefCard).join("");
+  // Build video-centric data: Map<videoId, { ref, timestamp, snippet }[]>
+  const videoHits = new Map();
+  for (const ref of matched) {
+    const entries = indexData.references[ref];
+    if (!entries) continue;
+    for (const entry of entries) {
+      if (!videoHits.has(entry.video_id)) videoHits.set(entry.video_id, []);
+      videoHits.get(entry.video_id).push({
+        ref,
+        timestamp: entry.timestamp,
+        snippet: entry.snippet,
+      });
+    }
+  }
+
+  // Sort hits within each video by timestamp
+  for (const hits of videoHits.values()) {
+    hits.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  // Convert to array for sorting
+  let videoList = Array.from(videoHits.entries()).map(([videoId, hits]) => ({
+    videoId,
+    hits,
+    video: videosData.videos[videoId],
+  }));
+
+  // Remove entries with no video metadata
+  videoList = videoList.filter((v) => v.video);
+
+  // Sort videos
+  videoList = sortVideos(videoList, currentSort);
+
+  // Show sort controls
+  sortControls.classList.remove("hidden");
+
+  const limit = 100;
+  const shown = videoList.slice(0, limit);
+  const html = shown.map(buildVideoCard).join("");
 
   container.innerHTML =
     html +
-    (matched.length > limit
-      ? `<p class="hint">Showing first ${limit} of ${matched.length} matches – refine your search to narrow results.</p>`
+    (videoList.length > limit
+      ? `<p class="hint">Showing first ${limit} of ${videoList.length} videos – refine your search to narrow results.</p>`
       : "");
+}
+
+/**
+ * Sort the video list according to the selected mode.
+ */
+function sortVideos(videoList, mode) {
+  switch (mode) {
+    case "relevance":
+      return videoList.sort((a, b) => b.hits.length - a.hits.length);
+    case "date-desc":
+      return videoList.sort((a, b) =>
+        (b.video.published_date || "").localeCompare(a.video.published_date || "")
+      );
+    case "date-asc":
+      return videoList.sort((a, b) =>
+        (a.video.published_date || "").localeCompare(b.video.published_date || "")
+      );
+    case "views":
+      return videoList.sort((a, b) => (b.video.view_count || 0) - (a.video.view_count || 0));
+    default:
+      return videoList;
+  }
 }
 
 /* ── Card builder ───────────────────────────────────────────────── */
 
 /**
- * @param {string} ref  canonical scripture reference
- * @returns {string} HTML for one reference card
+ * Build HTML for a single video card with all its scripture hits.
+ * @param {{ videoId: string, hits: Array<{ref:string, timestamp:number, snippet:string}>, video: object }} item
+ * @returns {string}
  */
-function buildRefCard(ref) {
-  const entries = indexData.references[ref];
-  if (!entries || entries.length === 0) return "";
+function buildVideoCard(item) {
+  const { videoId, hits, video } = item;
+  const videoUrl = `https://www.youtube.com/watch?v=${esc(videoId)}`;
+  const thumbHtml = video.thumbnail
+    ? `<img src="${esc(video.thumbnail)}" alt="" class="thumbnail" loading="lazy">`
+    : "";
 
-  const entriesHtml = entries
-    .map((entry) => {
-      const video = videosData.videos[entry.video_id];
-      if (!video) return "";
+  const metaParts = [];
+  if (video.published_date) {
+    metaParts.push(esc(video.published_date));
+  } else if (video.published) {
+    metaParts.push(esc(video.published));
+  }
+  if (video.view_count) metaParts.push(`${video.view_count.toLocaleString()} views`);
+  const metaHtml = metaParts.length
+    ? `<span class="video-meta">${metaParts.join(" · ")}</span>`
+    : "";
 
-      const ts = entry.timestamp;
-      const timeStr = formatTime(ts);
-      const ytUrl = `https://www.youtube.com/watch?v=${esc(entry.video_id)}&t=${ts}`;
-      const thumbHtml = video.thumbnail
-        ? `<img src="${esc(video.thumbnail)}" alt="" class="thumbnail" loading="lazy">`
+  const hitsHtml = hits
+    .map((hit) => {
+      const tsUrl = `${videoUrl}&t=${hit.timestamp}`;
+      const timeStr = formatTime(hit.timestamp);
+      const snippetHtml = hit.snippet
+        ? `<span class="snippet">&ldquo;${boldRef(esc(hit.snippet), hit.ref)}&rdquo;</span>`
         : "";
-      const snippetHtml = entry.snippet
-        ? `<span class="snippet">&ldquo;${esc(entry.snippet)}&rdquo;</span>`
-        : "";
-
-      return `<div class="entry">
-  <a href="${ytUrl}" target="_blank" rel="noopener noreferrer" class="video-link">
-    ${thumbHtml}
-    <div class="entry-info">
-      <span class="video-title">${esc(video.title)}</span>
-      <span class="timestamp">⏱ ${timeStr}</span>
-      ${snippetHtml}
-    </div>
-  </a>
-</div>`;
+      return `<a href="${tsUrl}" target="_blank" rel="noopener noreferrer" class="hit-line">
+        <span class="hit-ref">${esc(hit.ref)}</span>
+        <span class="timestamp">⏱ ${timeStr}</span>
+        ${snippetHtml}
+      </a>`;
     })
     .join("");
 
-  return `<div class="ref-group">
-  <h2 class="ref-title">${esc(ref)}</h2>
-  <div class="ref-entries">${entriesHtml}</div>
+  return `<div class="video-card">
+  <a href="${videoUrl}" target="_blank" rel="noopener noreferrer" class="video-header">
+    ${thumbHtml}
+    <div class="video-header-info">
+      <span class="video-title">${esc(video.title)}</span>
+      ${metaHtml}
+      <span class="hit-count">${hits.length} match${hits.length === 1 ? "" : "es"}</span>
+    </div>
+  </a>
+  <div class="hit-lines">${hitsHtml}</div>
 </div>`;
+}
+
+/**
+ * Bold the scripture reference within an already-escaped snippet.
+ * @param {string} escapedSnippet  HTML-escaped snippet text
+ * @param {string} ref  canonical reference (e.g. "Genesis 21:17")
+ */
+function boldRef(escapedSnippet, ref) {
+  const escapedRef = esc(ref);
+  return escapedSnippet.replace(escapedRef, `<strong>${escapedRef}</strong>`);
 }
 
 /* ── Utilities ──────────────────────────────────────────────────── */

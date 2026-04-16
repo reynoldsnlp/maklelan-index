@@ -116,6 +116,25 @@ def extract_yt_initial_player_response(html: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Publish date extraction
+# ---------------------------------------------------------------------------
+
+
+def extract_publish_date(player_data: dict) -> str:
+    """Extract the ISO 8601 publish date from an InnerTube player response.
+
+    Looks in ``microformat.playerMicroformatRenderer.publishDate``.
+    Returns a date string like ``"2024-03-15"`` or ``""`` if not found.
+    """
+    try:
+        raw = player_data["microformat"]["playerMicroformatRenderer"]["publishDate"]
+        # raw is like "2024-03-15T08:52:53-07:00"; keep just the date part
+        return raw[:10]
+    except (KeyError, TypeError, IndexError):
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # Data persistence
 # ---------------------------------------------------------------------------
 

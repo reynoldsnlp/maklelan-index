@@ -34,7 +34,18 @@
   </section>
 
   <section id="results" aria-live="polite" aria-label="Search results">
-    <p id="stats" aria-live="polite"></p>
+    <div id="results-bar">
+      <p id="stats" aria-live="polite"></p>
+      <div id="sort-controls" class="hidden">
+        <label for="sort-select">Sort by:</label>
+        <select id="sort-select">
+          <option value="relevance">Relevance (most hits)</option>
+          <option value="date-desc">Date (newest first)</option>
+          <option value="date-asc">Date (oldest first)</option>
+          <option value="views">Popularity (most views)</option>
+        </select>
+      </div>
+    </div>
     <div id="results-list"></div>
   </section>
 </main>

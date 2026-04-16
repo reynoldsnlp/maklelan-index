@@ -35,6 +35,7 @@ from common import (  # noqa: E402
     STATUS_NOT_ATTEMPTED,
     STATUS_YES,
     TRANSCRIPT_DIR,
+    extract_publish_date,
     extract_yt_initial_player_response,
     load_data,
     make_session,
@@ -170,17 +171,23 @@ def fetch_transcript(
     video_id: str,
     *,
     yt_api: YouTubeTranscriptApi,
-) -> list[dict]:
+) -> tuple[list[dict], str]:
     """Fetch the English transcript for *video_id*.
+
+    Returns ``(transcript_segments, publish_date)``.  *publish_date* is an
+    ISO date string (``"2024-03-15"``) extracted from the player response,
+    or ``""`` if unavailable.
 
     1. Return from local cache if available.
     2. Try ``youtube-transcript-api``.
     3. Try each InnerTube client type.
     4. Fall back to scraping the watch-page HTML.
     """
+    publish_date = ""
+
     cached = _load_cached_transcript(video_id)
     if cached is not None:
-        return cached
+        return cached, publish_date
 
     caption_url: str | None = None
 
@@ -190,7 +197,7 @@ def fetch_transcript(
         transcript = [{"start": seg.start, "dur": seg.duration, "text": seg.text} for seg in fetched]
         if transcript:
             _save_transcript(video_id, transcript)
-            return transcript
+            return transcript, publish_date
     except Exception as exc:
         print(f"  youtube-transcript-api failed: {exc}", flush=True)
         polite_sleep(_DELAY_BETWEEN_FALLBACKS)
@@ -199,6 +206,8 @@ def fetch_transcript(
     for client_type, client in innertube_clients:
         try:
             player_data = client.player(video_id)
+            if not publish_date:
+                publish_date = extract_publish_date(player_data)
             caption_url = _caption_url_from_player_response(player_data)
             if caption_url:
                 print(f"  Caption URL found via InnerTube({client_type})", flush=True)
@@ -218,6 +227,8 @@ def fetch_transcript(
             resp.raise_for_status()
             player_response = extract_yt_initial_player_response(resp.text)
             if player_response:
+                if not publish_date:
+                    publish_date = extract_publish_date(player_response)
                 caption_url = _caption_url_from_player_response(player_response)
             if not caption_url:
                 caption_url = _caption_url_from_watch_page(resp.text)
@@ -227,7 +238,7 @@ def fetch_transcript(
             print(f"  Could not fetch watch page: {exc}", flush=True)
 
     if not caption_url:
-        return []
+        return [], publish_date
 
     polite_sleep(_DELAY_BETWEEN_FALLBACKS)
     try:
@@ -236,15 +247,71 @@ def fetch_transcript(
         transcript = parse_transcript_xml(xml_resp.text)
         if transcript:
             _save_transcript(video_id, transcript)
-        return transcript
+        return transcript, publish_date
     except Exception as exc:
         print(f"  Could not fetch transcript XML: {exc}", flush=True)
-        return []
+        return [], publish_date
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+def _fetch_publish_date(
+    innertube_clients: list[tuple[str, InnerTube]],
+    video_id: str,
+) -> str:
+    """Make a lightweight player request solely to get the publish date."""
+    for client_type, client in innertube_clients:
+        try:
+            player_data = client.player(video_id)
+            date = extract_publish_date(player_data)
+            if date:
+                return date
+        except Exception:
+            pass
+        polite_sleep(_DELAY_BETWEEN_FALLBACKS)
+    return ""
+
+
+def _backfill_dates(videos_data: dict, max_count: int) -> None:
+    """Fetch real publish dates for videos that are missing them."""
+    innertube_clients: list[tuple[str, InnerTube]] = [
+        (t, InnerTube(t)) for t in PLAYER_CLIENT_TYPES
+    ]
+
+    missing = [
+        rec for rec in videos_data.get("videos", {}).values()
+        if not rec.get("published_date")
+    ]
+    if not missing:
+        print("All videos already have publish dates.", flush=True)
+        return
+
+    if len(missing) > max_count:
+        print(
+            f"Capping date backfill to {max_count} of {len(missing)} videos.",
+            flush=True,
+        )
+        missing = missing[:max_count]
+
+    print(f"Backfilling publish dates for {len(missing)} videos …", flush=True)
+    filled = 0
+    for i, rec in enumerate(missing, 1):
+        vid_id = rec["id"]
+        print(f"  [{i}/{len(missing)}] {rec.get('title', vid_id)[:60]}", end="", flush=True)
+        date = _fetch_publish_date(innertube_clients, vid_id)
+        if date:
+            videos_data["videos"][vid_id]["published_date"] = date
+            filled += 1
+            print(f" → {date}", flush=True)
+        else:
+            print(" → no date found", flush=True)
+        polite_sleep(_DELAY_BETWEEN_VIDEOS)
+
+    save_videos(videos_data)
+    print(f"Backfilled {filled} publish dates.", flush=True)
 
 
 def main() -> None:
@@ -253,15 +320,23 @@ def main() -> None:
         "--max", type=int, default=DEFAULT_MAX_TRANSCRIPTS,
         help=f"Maximum number of transcripts to fetch (default: {DEFAULT_MAX_TRANSCRIPTS})",
     )
+    parser.add_argument(
+        "--no-backfill-dates", action="store_true",
+        help="Skip backfilling publish dates for videos that are missing them.",
+    )
     args = parser.parse_args()
     max_transcripts: int = args.max
+
+    _, videos_data = load_data()
+
+    if not args.no_backfill_dates:
+        _backfill_dates(videos_data, max_transcripts)
 
     session = make_session()
     innertube_clients: list[tuple[str, InnerTube]] = [
         (t, InnerTube(t)) for t in PLAYER_CLIENT_TYPES
     ]
     yt_api = YouTubeTranscriptApi()
-    _, videos_data = load_data()
 
     to_process = [
         rec for rec in videos_data.get("videos", {}).values()
@@ -286,7 +361,13 @@ def main() -> None:
         vid_record = videos_data["videos"][vid_id]
         print(f"[{i}/{len(to_process)}] {video.get('title', vid_id)[:70]}", flush=True)
 
-        transcript = fetch_transcript(session, innertube_clients, vid_id, yt_api=yt_api)
+        transcript, publish_date = fetch_transcript(session, innertube_clients, vid_id, yt_api=yt_api)
+
+        # Save publish date if we got one and the record doesn't have one yet
+        if publish_date and not vid_record.get("published_date"):
+            vid_record["published_date"] = publish_date
+            print(f"  Published: {publish_date}", flush=True)
+
         if not transcript:
             consecutive_failures += 1
             print(
