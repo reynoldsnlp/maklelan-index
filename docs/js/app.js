@@ -77,6 +77,61 @@ async function init() {
 /* ── Search / filter ───────────────────────────────────────────── */
 
 /**
+ * Parse a scripture reference string into its components.
+ * Handles: "Book", "Book Ch", "Book Ch:V", "Book Ch:V-V2"
+ * @param {string} str
+ * @returns {{ book: string, chapter: number|null, verseStart: number|null, verseEnd: number|null } | null}
+ */
+function parseScriptureQuery(str) {
+  const m = str.match(/^(.+?)\s+(\d+)(?::(\d+)(?:\s*-\s*(\d+))?)?$/);
+  if (!m) {
+    // Could be just a book name (e.g. "Genesis", "1 Cor")
+    if (/[a-z]/i.test(str)) return { book: str.trim(), chapter: null, verseStart: null, verseEnd: null };
+    return null;
+  }
+  return {
+    book: m[1].trim(),
+    chapter: parseInt(m[2], 10),
+    verseStart: m[3] ? parseInt(m[3], 10) : null,
+    verseEnd: m[4] ? parseInt(m[4], 10) : m[3] ? parseInt(m[3], 10) : null,
+  };
+}
+
+/**
+ * Test whether a canonical reference matches a parsed query, with verse-range
+ * awareness.  For example, query "Genesis 1:8" matches ref "Genesis 1:1-23"
+ * because verse 8 falls within 1–23.
+ * @param {string} ref  canonical reference from the index
+ * @param {{ book: string, chapter: number|null, verseStart: number|null, verseEnd: number|null }} q  parsed query
+ * @returns {boolean}
+ */
+function refMatchesQuery(ref, q) {
+  const r = parseScriptureQuery(ref);
+  if (!r) return false;
+
+  // Book must match (case-insensitive prefix/substring)
+  if (!r.book.toLowerCase().startsWith(q.book.toLowerCase())
+      && !r.book.toLowerCase().includes(q.book.toLowerCase())) {
+    return false;
+  }
+
+  // If query has no chapter, book match is enough
+  if (q.chapter === null) return true;
+
+  // Chapter must match exactly
+  if (r.chapter !== q.chapter) return false;
+
+  // If query has no verse, chapter match is enough
+  if (q.verseStart === null) return true;
+
+  // If the indexed ref has no verse, chapter match is enough
+  if (r.verseStart === null) return true;
+
+  // Verse-range overlap: query range and ref range must intersect
+  return q.verseStart <= r.verseEnd && q.verseEnd >= r.verseStart;
+}
+
+/**
  * Filter allRefs to those matching *query* and render results.
  * @param {string} query
  */
@@ -89,7 +144,10 @@ function render(query) {
     return;
   }
 
-  const matched = allRefs.filter((ref) => ref.toLowerCase().includes(q));
+  const parsed = parseScriptureQuery(query.trim());
+  const matched = parsed
+    ? allRefs.filter((ref) => refMatchesQuery(ref, parsed))
+    : allRefs.filter((ref) => ref.toLowerCase().includes(q));
 
   if (matched.length === 0) {
     container.innerHTML = `<p class="no-results">No results for <strong>${esc(query)}</strong>.</p>`;
