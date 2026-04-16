@@ -1,4 +1,4 @@
-name: Scrape and Update Index
+name: Scrape Videos
 
 on:
   schedule:
@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write   # needed to commit updated data files
+  issues: write     # needed to create/comment on issues
 
 jobs:
   scrape:
@@ -27,17 +28,56 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run scraper
-        run: uv run python scraper/scrape.py
+      - name: Fetch video list
+        run: uv run python scraper/fetch_videos.py
 
-      - name: Commit updated data
+      - name: Commit updated videos.json
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/data/
-          # Only commit if there are actual changes
+          git add docs/data/videos.json
           git diff --staged --quiet \
-            || git commit -m "chore: update scripture index [skip ci]"
+            || git commit -m "chore: update videos.json [skip ci]"
 
       - name: Push changes
         run: git push
+
+      - name: Check for pending videos and create/update issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PENDING=$(python3 -c "
+          import json, pathlib
+          vf = pathlib.Path('docs/data/videos.json')
+          if not vf.exists():
+              print(0)
+          else:
+              data = json.loads(vf.read_text())
+              count = sum(1 for v in data.get('videos', {}).values()
+                          if v.get('processed') not in ('yes', 'no_refs'))
+              print(count)
+          ")
+          echo "Pending videos: $PENDING"
+          if [ "$PENDING" -gt 0 ]; then
+            # Check if an open issue named "scrape transcripts" already exists
+            ISSUE_NUM=$(gh issue list --state open --search "scrape transcripts in:title" --json number,title \
+              | python3 -c "
+          import json, sys
+          issues = json.load(sys.stdin)
+          for i in issues:
+              if i['title'] == 'scrape transcripts':
+                  print(i['number'])
+                  break
+          " 2>/dev/null || true)
+            if [ -n "$ISSUE_NUM" ]; then
+              echo "Issue #$ISSUE_NUM already exists — adding comment."
+              gh issue comment "$ISSUE_NUM" --body "@reynoldsnlp please do this"
+            else
+              echo "Creating new 'scrape transcripts' issue."
+              gh issue create --title "scrape transcripts" \
+                --body "$PENDING videos need transcript processing." \
+                --assignee reynoldsnlp
+            fi
+          else
+            echo "No pending videos — skipping issue creation."
+          fi
