@@ -51,7 +51,7 @@ from common import (  # noqa: E402
 DEFAULT_MAX_TRANSCRIPTS = 49
 
 # Stop processing after this many consecutive failures (likely IP ban)
-_MAX_CONSECUTIVE_FAILURES = 5
+_MAX_CONSECUTIVE_FAILURES = 1
 
 
 # ---------------------------------------------------------------------------
