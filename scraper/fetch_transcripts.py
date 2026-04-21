@@ -306,11 +306,11 @@ def _backfill_dates(videos_data: dict, max_count: int) -> None:
             videos_data["videos"][vid_id]["published_date"] = date
             filled += 1
             print(f" → {date}", flush=True)
+            save_videos(videos_data)
         else:
             print(" → no date found", flush=True)
         polite_sleep(_DELAY_BETWEEN_VIDEOS)
 
-    save_videos(videos_data)
     print(f"Backfilled {filled} publish dates.", flush=True)
 
 
@@ -376,6 +376,7 @@ def main() -> None:
                 flush=True,
             )
             vid_record["processed"] = STATUS_FAILED
+            save_videos(videos_data)
             if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
                 print(
                     f"\n⚠ {_MAX_CONSECUTIVE_FAILURES} consecutive failures – "
@@ -389,9 +390,9 @@ def main() -> None:
         consecutive_failures = 0
         fetched_count += 1
         print(f"  Transcript: {len(transcript)} segments", flush=True)
+        save_videos(videos_data)
         polite_sleep(_DELAY_BETWEEN_VIDEOS)
 
-    save_videos(videos_data)
     print(f"Done. Fetched {fetched_count} transcripts.", flush=True)
 
 
