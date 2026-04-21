@@ -18,6 +18,7 @@ from pathlib import Path
 from innertube import InnerTube
 
 sys.path.insert(0, str(Path(__file__).parent))
+import build_index  # noqa: E402
 from common import (  # noqa: E402
     CHANNEL_URL,
     STATUS_NOT_ATTEMPTED,
@@ -280,3 +281,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    build_index.main()

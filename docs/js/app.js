@@ -93,32 +93,66 @@ async function init() {
 /* ── Search / filter ───────────────────────────────────────────── */
 
 /**
- * Parse a scripture reference string into its components.
- * Handles: "Book", "Book Ch", "Book Ch:V", "Book Ch:V-V2"
+ * Parse a scripture reference string into an inclusive (chapter, verse) span.
+ * Handles: "Book", "Book Ch", "Book Ch-Ch2", "Book Ch:V",
+ * "Book Ch:V-V2", "Book Ch:V-Ch2:V2".
+ * A null verse in a span endpoint means "any verse in that chapter".
  * @param {string} str
- * @returns {{ book: string, chapter: number|null, verseStart: number|null, verseEnd: number|null } | null}
+ * @returns {{ book: string, chapterStart: number|null, verseStart: number|null, chapterEnd: number|null, verseEnd: number|null } | null}
  */
 function parseScriptureQuery(str) {
-  const m = str.match(/^(.+?)\s+(\d+)(?::(\d+)(?:\s*-\s*(\d+))?)?$/);
-  if (!m) {
-    // Could be just a book name (e.g. "Genesis", "1 Cor")
-    if (/[a-z]/i.test(str)) return { book: str.trim(), chapter: null, verseStart: null, verseEnd: null };
-    return null;
+  str = str.trim();
+  let m;
+
+  // Book Ch:V-Ch2:V2
+  if ((m = str.match(/^(.+?)\s+(\d+):(\d+)\s*-\s*(\d+):(\d+)$/))) {
+    return { book: m[1].trim(), chapterStart: +m[2], verseStart: +m[3], chapterEnd: +m[4], verseEnd: +m[5] };
   }
-  return {
-    book: m[1].trim(),
-    chapter: parseInt(m[2], 10),
-    verseStart: m[3] ? parseInt(m[3], 10) : null,
-    verseEnd: m[4] ? parseInt(m[4], 10) : m[3] ? parseInt(m[3], 10) : null,
-  };
+  // Book Ch:V-V2
+  if ((m = str.match(/^(.+?)\s+(\d+):(\d+)\s*-\s*(\d+)$/))) {
+    return { book: m[1].trim(), chapterStart: +m[2], verseStart: +m[3], chapterEnd: +m[2], verseEnd: +m[4] };
+  }
+  // Book Ch:V
+  if ((m = str.match(/^(.+?)\s+(\d+):(\d+)$/))) {
+    return { book: m[1].trim(), chapterStart: +m[2], verseStart: +m[3], chapterEnd: +m[2], verseEnd: +m[3] };
+  }
+  // Book Ch-Ch2
+  if ((m = str.match(/^(.+?)\s+(\d+)\s*-\s*(\d+)$/))) {
+    return { book: m[1].trim(), chapterStart: +m[2], verseStart: null, chapterEnd: +m[3], verseEnd: null };
+  }
+  // Book Ch
+  if ((m = str.match(/^(.+?)\s+(\d+)$/))) {
+    return { book: m[1].trim(), chapterStart: +m[2], verseStart: null, chapterEnd: +m[2], verseEnd: null };
+  }
+  // Bare book name (e.g. "Genesis", "1 Cor")
+  if (/[a-z]/i.test(str)) {
+    return { book: str, chapterStart: null, verseStart: null, chapterEnd: null, verseEnd: null };
+  }
+  return null;
+}
+
+// Max verses-per-chapter slot used to linearize (chapter, verse) pairs so that
+// range overlap reduces to a simple interval intersection. Any value larger
+// than the longest chapter in scripture (Psalm 119, 176 verses) works.
+const VERSES_PER_CHAPTER = 10000;
+
+/** Linear scalar for the start of a (chapter, verse) endpoint; null verse → 0. */
+function spanStart(chapter, verse) {
+  return chapter * VERSES_PER_CHAPTER + (verse === null ? 0 : verse);
+}
+
+/** Linear scalar for the end of a (chapter, verse) endpoint; null verse → end of chapter. */
+function spanEnd(chapter, verse) {
+  return chapter * VERSES_PER_CHAPTER + (verse === null ? VERSES_PER_CHAPTER - 1 : verse);
 }
 
 /**
- * Test whether a canonical reference matches a parsed query, with verse-range
- * awareness.  For example, query "Genesis 1:8" matches ref "Genesis 1:1-23"
- * because verse 8 falls within 1–23.
+ * Test whether a canonical reference matches a parsed query. Both sides are
+ * treated as inclusive spans over (chapter, verse); they match when the spans
+ * intersect. So "Genesis 1-2" matches "Gen 1" and "Gen 2"; "Gen 1:4-8" matches
+ * each of 1:4…1:8; and "Gen 1:10-11" matches a ref to "Gen 1:11-12".
  * @param {string} ref  canonical reference from the index
- * @param {{ book: string, chapter: number|null, verseStart: number|null, verseEnd: number|null }} q  parsed query
+ * @param {ReturnType<typeof parseScriptureQuery>} q  parsed query
  * @returns {boolean}
  */
 function refMatchesQuery(ref, q) {
@@ -126,25 +160,20 @@ function refMatchesQuery(ref, q) {
   if (!r) return false;
 
   // Book must match (case-insensitive prefix/substring)
-  if (!r.book.toLowerCase().startsWith(q.book.toLowerCase())
-      && !r.book.toLowerCase().includes(q.book.toLowerCase())) {
-    return false;
-  }
+  const rb = r.book.toLowerCase();
+  const qb = q.book.toLowerCase();
+  if (!rb.startsWith(qb) && !rb.includes(qb)) return false;
 
   // If query has no chapter, book match is enough
-  if (q.chapter === null) return true;
+  if (q.chapterStart === null) return true;
+  // If ref has no chapter (bare book name), book match is enough
+  if (r.chapterStart === null) return true;
 
-  // Chapter must match exactly
-  if (r.chapter !== q.chapter) return false;
-
-  // If query has no verse, chapter match is enough
-  if (q.verseStart === null) return true;
-
-  // If the indexed ref has no verse, chapter match is enough
-  if (r.verseStart === null) return true;
-
-  // Verse-range overlap: query range and ref range must intersect
-  return q.verseStart <= r.verseEnd && q.verseEnd >= r.verseStart;
+  const qS = spanStart(q.chapterStart, q.verseStart);
+  const qE = spanEnd(q.chapterEnd, q.verseEnd);
+  const rS = spanStart(r.chapterStart, r.verseStart);
+  const rE = spanEnd(r.chapterEnd, r.verseEnd);
+  return qS <= rE && qE >= rS;
 }
 
 /**

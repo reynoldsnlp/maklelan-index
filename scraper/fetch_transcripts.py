@@ -28,6 +28,7 @@ from innertube import InnerTube
 from youtube_transcript_api import YouTubeTranscriptApi
 
 sys.path.insert(0, str(Path(__file__).parent))
+import build_index  # noqa: E402
 from common import (  # noqa: E402
     PLAYER_CLIENT_TYPES,
     STATUS_FAILED,
@@ -397,4 +398,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.", flush=True)
+    build_index.main()
