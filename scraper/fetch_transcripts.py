@@ -285,9 +285,14 @@ def _backfill_dates(videos_data: dict, max_count: int) -> None:
     missing = [
         rec for rec in videos_data.get("videos", {}).values()
         if not rec.get("published_date")
+        and (TRANSCRIPT_DIR / f"{rec['id']}.json").exists()
     ]
     if not missing:
-        print("All videos already have publish dates.", flush=True)
+        print(
+            "No videos with transcripts are missing publish dates – "
+            "skipping backfill.",
+            flush=True,
+        )
         return
 
     if len(missing) > max_count:
