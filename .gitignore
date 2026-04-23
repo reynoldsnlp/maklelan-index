@@ -11,3 +11,9 @@ build/
 *.log
 .idea/
 .vscode/
+
+# Playwright persistent browser profile (cookies, cache, localStorage)
+data/playwright-profile/
+
+# Last-failed scrape DOM dump (overwritten each run)
+failed-scrape.html
