@@ -3,15 +3,74 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Dan McClellan Scripture Index — Search @maklelan YouTube videos by Bible reference</title>
   <meta name="description"
-        content="Searchable scripture reference index for Dan McClellan's (@maklelan) YouTube videos." />
-  <title>McClellan Scripture Index</title>
+        content="Searchable scripture reference index for Dan McClellan's (@maklelan) YouTube videos. Find every video and timestamp where Dan McClellan discusses a Bible passage — Genesis, Psalms, Gospels, Pauline epistles, and more." />
+  <meta name="keywords"
+        content="Dan McClellan, maklelan, Daniel McClellan, Data Over Dogma, scripture index, Bible reference search, biblical scholarship, Hebrew Bible, New Testament, YouTube transcript search" />
+  <meta name="author" content="Dan McClellan (videos); reynoldsnlp (index)" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <link rel="canonical" href="https://reynoldsnlp.github.io/maklelan-index/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="McClellan Scripture Index" />
+  <meta property="og:title" content="Dan McClellan Scripture Index — Search @maklelan by Bible reference" />
+  <meta property="og:description"
+        content="Find every video and timestamp where Dan McClellan (@maklelan) discusses a given scripture passage." />
+  <meta property="og:url" content="https://reynoldsnlp.github.io/maklelan-index/" />
+  <meta property="og:locale" content="en_US" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Dan McClellan Scripture Index" />
+  <meta name="twitter:description"
+        content="Search Dan McClellan's (@maklelan) YouTube videos by scripture reference." />
+
   <link rel="stylesheet" href="css/style.css" />
+
+  <!-- Structured data: WebSite with SearchAction + about Dan McClellan -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://reynoldsnlp.github.io/maklelan-index/#website",
+        "url": "https://reynoldsnlp.github.io/maklelan-index/",
+        "name": "McClellan Scripture Index",
+        "description": "Searchable scripture reference index for Dan McClellan's (@maklelan) YouTube videos.",
+        "inLanguage": "en",
+        "about": { "@id": "https://reynoldsnlp.github.io/maklelan-index/#person" },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://reynoldsnlp.github.io/maklelan-index/?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@type": "Person",
+        "@id": "https://reynoldsnlp.github.io/maklelan-index/#person",
+        "name": "Dan McClellan",
+        "alternateName": ["Daniel McClellan", "maklelan", "@maklelan"],
+        "description": "Biblical scholar known for YouTube and TikTok videos on the Bible and biblical scholarship.",
+        "sameAs": [
+          "https://www.youtube.com/@maklelan",
+          "https://www.tiktok.com/@maklelan"
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
 
 <header>
-  <h1>📖 McClellan Scripture Index</h1>
+  <h1>📖 Dan McClellan Scripture Index</h1>
   <p>
     Search Dan McClellan's
     (<a href="https://www.youtube.com/@maklelan" target="_blank" rel="noopener">@maklelan</a>)
@@ -47,6 +106,31 @@
       </div>
     </div>
     <div id="results-list"></div>
+  </section>
+
+  <!-- Crawlable prose so search engines have content even before JS loads -->
+  <section class="about" aria-label="About this index">
+    <h2>About this index</h2>
+    <p>
+      This site is an unofficial, searchable index of scripture references in
+      <strong>Dan McClellan</strong>'s (<a href="https://www.youtube.com/@maklelan" target="_blank" rel="noopener">@maklelan</a>)
+      YouTube videos. Dan McClellan is a biblical scholar who posts short videos on
+      the Hebrew Bible, the New Testament, biblical languages, textual criticism,
+      and the academic study of religion.
+    </p>
+    <p>
+      Type any Bible reference — for example <em>Genesis 1:1</em>, <em>Exodus 20</em>,
+      <em>Psalm 22</em>, <em>Isaiah 53</em>, <em>Matthew 5</em>, <em>John 3:16</em>,
+      <em>Romans 8</em>, or <em>1 Corinthians 15</em> — to find every video and
+      timestamp where Dan McClellan discusses that passage. Clicking a result opens
+      the YouTube video at the exact moment the reference is mentioned.
+    </p>
+    <p>
+      The index is built automatically from video transcripts (closed captions) and
+      updated weekly. It is not affiliated with Dan McClellan or the @maklelan
+      channel. See <a href="https://github.com/reynoldsnlp/maklelan-index" target="_blank" rel="noopener">the GitHub repository</a>
+      for source code and details.
+    </p>
   </section>
 </main>
 

@@ -524,6 +524,66 @@ def _extract_player_response(page: Page) -> dict | None:
         return None
 
 
+# Robust publish-date extraction that survives SPA navigation.
+# ``window.ytInitialPlayerResponse`` is only reliably populated on a full
+# page load; clicking a search result uses yt-navigate which leaves the
+# previous value in place (or unsets it) — so we also probe meta tags
+# and, as a last resort, regex the inline scripts for the field.
+_PUBLISH_DATE_JS = r"""
+() => {
+    const pick = (s) => (typeof s === 'string' && s.length >= 10)
+        ? s.substring(0, 10) : '';
+
+    // 1. meta tags — YouTube writes these on every watch page, SPA or not.
+    const metas = [
+        'meta[itemprop="datePublished"]',
+        'meta[itemprop="uploadDate"]',
+    ];
+    for (const sel of metas) {
+        const el = document.querySelector(sel);
+        const v = el && el.getAttribute('content');
+        const d = pick(v);
+        if (d) return d;
+    }
+
+    // 2. ytInitialPlayerResponse — stale after SPA nav, but worth a look
+    // when present and matching the current video.
+    try {
+        const pr = window.ytInitialPlayerResponse;
+        const mf = pr && pr.microformat && pr.microformat.playerMicroformatRenderer;
+        if (mf) {
+            const d = pick(mf.publishDate) || pick(mf.uploadDate);
+            if (d) {
+                const urlId = new URL(location.href).searchParams.get('v');
+                const prId = pr.videoDetails && pr.videoDetails.videoId;
+                if (!urlId || !prId || urlId === prId) return d;
+            }
+        }
+    } catch (e) {}
+
+    // 3. Regex over inline scripts — ytInitialData / ytInitialPlayerResponse
+    // literals include a publishDate field that survives SPA updates.
+    const scripts = document.querySelectorAll('script');
+    const re = /"publishDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/;
+    const re2 = /"uploadDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/;
+    for (const s of scripts) {
+        const t = s.textContent || '';
+        const m = re.exec(t) || re2.exec(t);
+        if (m) return m[1];
+    }
+
+    return '';
+}
+"""
+
+
+def _extract_publish_date_from_page(page: Page) -> str:
+    try:
+        return page.evaluate(_PUBLISH_DATE_JS) or ""
+    except Exception:
+        return ""
+
+
 def _fetch_caption_xml(context: BrowserContext, url: str) -> str | None:
     try:
         resp = context.request.get(url, timeout=30_000)
@@ -1083,25 +1143,22 @@ def fetch_transcript(
     # Primary path: the on-page transcript panel.
     segments = _transcript_from_panel(page)
     if segments:
-        # Grab the publish date opportunistically from the player
-        # response while the page is still open.
-        try:
-            player_data = _extract_player_response(page)
-            if player_data:
-                publish_date = extract_publish_date(player_data)
-        except Exception:
-            pass
+        publish_date = _extract_publish_date_from_page(page)
         _save_transcript(video_id, segments)
         return segments, publish_date
 
     # Fallback 1: direct API call from the page context.
     segments, publish_date = _get_transcript_via_api(page)
     if segments:
+        if not publish_date:
+            publish_date = _extract_publish_date_from_page(page)
         _save_transcript(video_id, segments)
         return segments, publish_date
 
     # Fallback 2: caption XML URL from ytInitialPlayerResponse.
     player_data = _extract_player_response(page)
+    if not publish_date:
+        publish_date = _extract_publish_date_from_page(page)
     if player_data:
         if not publish_date:
             publish_date = extract_publish_date(player_data)
@@ -1129,6 +1186,9 @@ def _fetch_publish_date(page: Page, video_id: str, title: str) -> str:
     if not _navigate_to_video(page, video_id, title):
         return ""
     _sleep(1.5, 3.5)
+    date = _extract_publish_date_from_page(page)
+    if date:
+        return date
     player_data = _extract_player_response(page)
     return extract_publish_date(player_data) if player_data else ""
 

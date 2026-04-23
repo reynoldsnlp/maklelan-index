@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from bible_books import find_scripture_refs  # noqa: E402
 from common import (
+    DATA_DIR,
     STATUS_FAILED,
     STATUS_NO_REFS,
     STATUS_NOT_ATTEMPTED,
@@ -29,6 +31,9 @@ from common import (
     save_index,
     save_videos,
 )
+
+SITE_URL = "https://reynoldsnlp.github.io/maklelan-index/"
+DOCS_DIR = DATA_DIR.parent  # docs/
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +95,36 @@ def refs_from_transcript(transcript: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# SEO artefacts
+# ---------------------------------------------------------------------------
+
+
+def write_sitemap() -> None:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"  <url>\n"
+        f"    <loc>{SITE_URL}</loc>\n"
+        f"    <lastmod>{today}</lastmod>\n"
+        f"    <changefreq>weekly</changefreq>\n"
+        f"    <priority>1.0</priority>\n"
+        f"  </url>\n"
+        "</urlset>\n"
+    )
+    (DOCS_DIR / "sitemap.xml").write_text(xml, encoding="utf-8")
+
+
+def write_robots() -> None:
+    txt = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        f"Sitemap: {SITE_URL}sitemap.xml\n"
+    )
+    (DOCS_DIR / "robots.txt").write_text(txt, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -143,6 +178,8 @@ def main() -> None:
 
     save_index(index)
     save_videos(videos_data)
+    write_sitemap()
+    write_robots()
 
     print(
         f"Built index: {len(index['references'])} references "
