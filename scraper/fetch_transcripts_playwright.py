@@ -41,9 +41,12 @@ Usage::
                                                     [--head]
                                                     [--profile-dir DIR]
 
-The default transcript limit is 49 per run, matching the sibling
-script.  Run with ``--head`` to watch the browser (useful for
-debugging selector drift after a YouTube UI change).
+By default the script runs until stopped (Ctrl+C) or an unrecoverable
+error occurs — at which point the indexer is run over whatever
+transcripts have been saved so far, then the script exits.  Pass
+``--max N`` to cap a run at a specific count.  Run with ``--head``
+to watch the browser (useful for debugging selector drift after a
+YouTube UI change).
 """
 
 from __future__ import annotations
@@ -80,13 +83,6 @@ from common import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # Tunables
 # ---------------------------------------------------------------------------
-
-DEFAULT_MAX_TRANSCRIPTS = 49
-
-# Stop after this many consecutive failures — matches fetch_transcripts.py.
-# If a well-disguised browser gets blocked once, odds are it will keep
-# getting blocked, so preserving progress beats burning the session.
-_MAX_CONSECUTIVE_FAILURES = 1
 
 # Default on-disk location for the Chromium user-data-dir.  A persistent
 # profile is a strong anti-detection signal: real users have cookies,
@@ -1140,7 +1136,7 @@ def _fetch_publish_date(page: Page, video_id: str, title: str) -> str:
 def _backfill_dates(
     page: Page,
     videos_data: dict,
-    max_count: int,
+    max_count: int | None,
 ) -> None:
     missing = [
         rec for rec in videos_data.get("videos", {}).values()
@@ -1155,7 +1151,7 @@ def _backfill_dates(
         )
         return
 
-    if len(missing) > max_count:
+    if max_count is not None and len(missing) > max_count:
         print(
             f"Capping date backfill to {max_count} of {len(missing)} videos.",
             flush=True,
@@ -1211,7 +1207,7 @@ def _run(args: argparse.Namespace) -> None:
                 if rec.get("processed") in (STATUS_NOT_ATTEMPTED, STATUS_FAILED)
                 and not (TRANSCRIPT_DIR / f"{rec['id']}.json").exists()
             ]
-            if len(to_process) > args.max:
+            if args.max is not None and len(to_process) > args.max:
                 print(
                     f"Capping to {args.max} videos this run "
                     f"({len(to_process)} pending).",
@@ -1224,7 +1220,6 @@ def _run(args: argparse.Namespace) -> None:
                 flush=True,
             )
 
-            consecutive_failures = 0
             fetched_count = 0
             for i, video in enumerate(to_process, 1):
                 vid_id = video["id"]
@@ -1235,42 +1230,23 @@ def _run(args: argparse.Namespace) -> None:
                     flush=True,
                 )
 
-                try:
-                    transcript, publish_date = fetch_transcript(
-                        context, page, vid_id, video.get("title", "")
-                    )
-                except Exception as exc:
-                    print(f"  Unexpected error: {exc}", flush=True)
-                    transcript, publish_date = [], ""
+                transcript, publish_date = fetch_transcript(
+                    context, page, vid_id, video.get("title", "")
+                )
 
                 if publish_date and not vid_record.get("published_date"):
                     vid_record["published_date"] = publish_date
                     print(f"  Published: {publish_date}", flush=True)
 
                 if not transcript:
-                    consecutive_failures += 1
-                    print(
-                        f"  No transcript – marking failed "
-                        f"({consecutive_failures}/"
-                        f"{_MAX_CONSECUTIVE_FAILURES} consecutive).",
-                        flush=True,
-                    )
+                    print("  No transcript – marking failed.", flush=True)
                     vid_record["processed"] = STATUS_FAILED
                     save_videos(videos_data)
-                    if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
-                        print(
-                            f"\n⚠ {_MAX_CONSECUTIVE_FAILURES} consecutive "
-                            f"failures – likely detected. Stopping early "
-                            f"to preserve progress.",
-                            flush=True,
-                        )
-                        break
-                    # Failure back-off — longer than the between-videos wait
-                    # so we do not hammer an unhappy YouTube.
+                    # Failure back-off — longer than the between-videos
+                    # wait so we do not hammer an unhappy YouTube.
                     _sleep(22.0, 45.0)
                     continue
 
-                consecutive_failures = 0
                 fetched_count += 1
                 print(f"  Transcript: {len(transcript)} segments", flush=True)
                 save_videos(videos_data)
@@ -1292,10 +1268,11 @@ def main() -> None:
         )
     )
     parser.add_argument(
-        "--max", type=int, default=DEFAULT_MAX_TRANSCRIPTS,
+        "--max", type=int, default=None,
         help=(
-            f"Maximum number of transcripts to fetch "
-            f"(default: {DEFAULT_MAX_TRANSCRIPTS})"
+            "Optional cap on number of transcripts fetched in this run. "
+            "Default: no cap — run until stopped (Ctrl+C) or an "
+            "unrecoverable error occurs."
         ),
     )
     parser.add_argument(
@@ -1322,4 +1299,11 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nInterrupted by user.", flush=True)
+    except Exception as exc:
+        # Any uncaught error (browser crash, YouTube markup change,
+        # network outage, …) should still flush accumulated progress
+        # into the index before exiting.
+        import traceback
+        print("\nFatal error — running indexer before exit:", flush=True)
+        traceback.print_exc()
     build_index.main()
