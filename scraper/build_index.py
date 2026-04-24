@@ -176,6 +176,11 @@ def main() -> None:
 
         processed_count += 1
 
+    for bucket in index["references"].values():
+        bucket.sort(key=lambda e: (e["video_id"], e["timestamp"]))
+    index["references"] = {k: index["references"][k] for k in sorted(index["references"])}
+    videos_data["videos"] = {k: videos[k] for k in sorted(videos)}
+
     save_index(index)
     save_videos(videos_data)
     write_sitemap()
