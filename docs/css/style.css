@@ -117,6 +117,118 @@ main {
   color: var(--text);
 }
 
+/* ── Group-by toggle switch ───────────────────────────────────── */
+#group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin-left: .75rem;
+}
+
+#group-toggle.hidden { display: none; }
+
+#group-toggle .toggle-text {
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+#group-toggle .toggle-label {
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  border-radius: 18px;
+  transition: background-color .2s;
+}
+
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  top: 2px;
+  background-color: #fff;
+  border-radius: 50%;
+  transition: transform .2s;
+}
+
+.switch input:checked + .slider {
+  background-color: var(--primary);
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(16px);
+}
+
+.switch input:focus-visible + .slider {
+  box-shadow: 0 0 0 3px rgba(59,111,160,.35);
+}
+
+/* ── Reference-group card ─────────────────────────────────────── */
+.ref-group-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.ref-group-header {
+  background: var(--primary);
+  color: #fff;
+  padding: .5rem .9rem;
+  font-weight: 600;
+  font-size: .95rem;
+}
+
+.ref-entry {
+  border-top: 1px solid var(--border);
+  padding: .4rem .25rem;
+}
+
+.ref-entry:first-of-type { border-top: none; }
+
+.ref-entry-header {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .25rem .75rem;
+}
+
+.ref-hit-line {
+  flex-wrap: wrap;
+}
+
+.ref-hit-title {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--primary-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
 /* ── Video card ───────────────────────────────────────────────── */
 .video-card {
   background: var(--surface);

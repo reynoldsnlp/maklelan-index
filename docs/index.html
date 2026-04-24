@@ -102,7 +102,17 @@
           <option value="date-desc">Date (newest first)</option>
           <option value="date-asc">Date (oldest first)</option>
           <option value="views">Popularity (most views)</option>
+          <option value="reference">Bible reference</option>
         </select>
+        <span id="group-toggle" class="hidden">
+          <span class="toggle-text">Group by</span>
+          <span class="toggle-label" id="group-label-video">video</span>
+          <label class="switch" aria-label="Group results by video or by reference">
+            <input type="checkbox" id="group-by-ref">
+            <span class="slider"></span>
+          </label>
+          <span class="toggle-label" id="group-label-ref">reference</span>
+        </span>
       </div>
     </div>
     <div id="results-list"></div>

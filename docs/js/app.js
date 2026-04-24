@@ -21,8 +21,31 @@ let allRefs = [];
 /** Current sort mode */
 let currentSort = "relevance";
 
+/** Current grouping mode when sorting by reference: "video" | "reference" */
+let currentGrouping = "video";
+
 /** Last query string (for re-sorting without re-filtering) */
 let lastQuery = "";
+
+const BOOK_ORDER = [
+  "Genesis","Exodus","Leviticus","Numbers","Deuteronomy",
+  "Joshua","Judges","Ruth",
+  "1 Samuel","2 Samuel","1 Kings","2 Kings",
+  "1 Chronicles","2 Chronicles",
+  "Ezra","Nehemiah","Esther","Job","Psalms","Proverbs",
+  "Ecclesiastes","Song of Solomon",
+  "Isaiah","Jeremiah","Lamentations","Ezekiel","Daniel",
+  "Hosea","Joel","Amos","Obadiah","Jonah","Micah",
+  "Nahum","Habakkuk","Zephaniah","Haggai","Zechariah","Malachi",
+  "Matthew","Mark","Luke","John","Acts","Romans",
+  "1 Corinthians","2 Corinthians","Galatians","Ephesians",
+  "Philippians","Colossians",
+  "1 Thessalonians","2 Thessalonians",
+  "1 Timothy","2 Timothy","Titus","Philemon",
+  "Hebrews","James",
+  "1 Peter","2 Peter",
+  "1 John","2 John","3 John","Jude","Revelation",
+];
 
 /* ── Bootstrap ─────────────────────────────────────────────────── */
 
@@ -81,6 +104,14 @@ async function init() {
   const sortSelect = document.getElementById("sort-select");
   sortSelect.addEventListener("change", () => {
     currentSort = sortSelect.value;
+    updateGroupToggleVisibility();
+    render(lastQuery);
+  });
+
+  // Attach group-by-ref toggle listener
+  const groupCheckbox = document.getElementById("group-by-ref");
+  groupCheckbox.addEventListener("change", () => {
+    currentGrouping = groupCheckbox.checked ? "reference" : "video";
     render(lastQuery);
   });
 
@@ -203,7 +234,17 @@ function render(query) {
     return;
   }
 
-  // Build video-centric data: Map<videoId, { ref, timestamp, snippet }[]>
+  // Show sort controls + group toggle (visibility of the toggle itself depends on sort mode)
+  sortControls.classList.remove("hidden");
+  updateGroupToggleVisibility();
+
+  // Reference-sorted + grouped-by-reference: render a reference-centric view
+  if (currentSort === "reference" && currentGrouping === "reference") {
+    renderByReference(matched, container);
+    return;
+  }
+
+  // Otherwise render video-centric
   const videoHits = new Map();
   for (const ref of matched) {
     const entries = indexData.references[ref];
@@ -236,9 +277,6 @@ function render(query) {
   // Sort videos
   videoList = sortVideos(videoList, currentSort);
 
-  // Show sort controls
-  sortControls.classList.remove("hidden");
-
   const limit = 100;
   const shown = videoList.slice(0, limit);
   const html = shown.map(buildVideoCard).join("");
@@ -248,6 +286,16 @@ function render(query) {
     (videoList.length > limit
       ? `<p class="hint">Showing first ${limit} of ${videoList.length} videos – refine your search to narrow results.</p>`
       : "");
+}
+
+/** Show the group-by toggle only when sorting by Bible reference. */
+function updateGroupToggleVisibility() {
+  const toggle = document.getElementById("group-toggle");
+  if (currentSort === "reference") {
+    toggle.classList.remove("hidden");
+  } else {
+    toggle.classList.add("hidden");
+  }
 }
 
 /**
@@ -267,9 +315,176 @@ function sortVideos(videoList, mode) {
       );
     case "views":
       return videoList.sort((a, b) => (b.video.view_count || 0) - (a.video.view_count || 0));
+    case "reference":
+      // Sort videos by the earliest Bible reference among their hits.
+      return videoList.sort((a, b) => {
+        const ka = earliestRefKey(a.hits);
+        const kb = earliestRefKey(b.hits);
+        return compareKeys(ka, kb);
+      });
     default:
       return videoList;
   }
+}
+
+/**
+ * Parse a canonical scripture reference string into structured fields, including
+ * a book-order index and whether the reference spans more than a single verse/chapter.
+ */
+function parseRef(ref) {
+  const p = parseScriptureQuery(ref);
+  if (!p) return null;
+  const bookIdx = BOOK_ORDER.indexOf(p.book);
+  return {
+    book: p.book,
+    bookIdx: bookIdx === -1 ? 999 : bookIdx,
+    chapterStart: p.chapterStart,
+    verseStart: p.verseStart,
+    chapterEnd: p.chapterEnd,
+    verseEnd: p.verseEnd,
+    isSpan: !(p.chapterStart === p.chapterEnd && p.verseStart === p.verseEnd),
+  };
+}
+
+/**
+ * Build an orderable sort key for a reference. Ordering rules:
+ *   - book in canonical order
+ *   - then starting chapter
+ *   - then starting verse; a missing verse sorts before verse 1 (Gen 1 before Gen 1:1)
+ *   - spans sort before individual items that share the same starting point
+ *   - then ending chapter, then ending verse (tiebreaker for differing spans)
+ */
+function refSortKey(ref) {
+  const p = parseRef(ref);
+  if (!p) return [999, 0, -1, 1, 0, -1];
+  const chapStart = p.chapterStart ?? 0;
+  // Missing verse sorts before any numbered verse
+  const verseStart = p.verseStart === null ? -1 : p.verseStart;
+  // Spans first within the same start key
+  const spanBucket = p.isSpan ? 0 : 1;
+  const chapEnd = p.chapterEnd ?? chapStart;
+  const verseEnd = p.verseEnd === null ? -1 : p.verseEnd;
+  return [p.bookIdx, chapStart, verseStart, spanBucket, chapEnd, verseEnd];
+}
+
+/** Lexicographic compare for numeric-array keys. */
+function compareKeys(a, b) {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/** Minimum sort key across a list of hits (each hit has a `.ref`). */
+function earliestRefKey(hits) {
+  let best = null;
+  for (const h of hits) {
+    const k = refSortKey(h.ref);
+    if (best === null || compareKeys(k, best) < 0) best = k;
+  }
+  return best ?? [999, 0, -1, 1, 0, -1];
+}
+
+/**
+ * Group key for a reference when grouping by reference: uses the starting
+ * point only, so that spans (e.g. "Gen 2:3-7") group with their first item ("Gen 2:3").
+ */
+function refGroupKey(ref) {
+  const p = parseRef(ref);
+  if (!p) return `~${ref}`;
+  const v = p.verseStart === null ? "" : p.verseStart;
+  return `${p.bookIdx}|${p.chapterStart ?? 0}|${v}`;
+}
+
+/** Human-readable header for a group, derived from the starting reference. */
+function refGroupLabel(ref) {
+  const p = parseRef(ref);
+  if (!p) return ref;
+  if (p.chapterStart === null) return p.book;
+  if (p.verseStart === null) return `${p.book} ${p.chapterStart}`;
+  return `${p.book} ${p.chapterStart}:${p.verseStart}`;
+}
+
+/**
+ * Render a reference-centric view: groups of references (keyed by starting
+ * point), each containing spans first, then individual refs; under each ref
+ * is a list of video hits (timestamp + snippet).
+ */
+function renderByReference(matchedRefs, container) {
+  // Organize by group key → ordered list of refs → list of hits
+  const groups = new Map();
+  for (const ref of matchedRefs) {
+    const entries = indexData.references[ref];
+    if (!entries || entries.length === 0) continue;
+    const key = refGroupKey(ref);
+    if (!groups.has(key)) groups.set(key, { label: refGroupLabel(ref), refs: [] });
+    groups.get(key).refs.push({
+      ref,
+      key: refSortKey(ref),
+      hits: entries.slice().sort((a, b) => {
+        const va = (videosData.videos[a.video_id]?.published_date) || "";
+        const vb = (videosData.videos[b.video_id]?.published_date) || "";
+        if (va !== vb) return vb.localeCompare(va); // newest first within a ref
+        return a.timestamp - b.timestamp;
+      }),
+    });
+  }
+
+  // Sort groups by their minimum ref key (which is also the group's starting point)
+  const groupList = Array.from(groups.values()).map((g) => {
+    g.refs.sort((a, b) => compareKeys(a.key, b.key));
+    return { ...g, key: g.refs[0].key };
+  });
+  groupList.sort((a, b) => compareKeys(a.key, b.key));
+
+  const totalHits = groupList.reduce(
+    (n, g) => n + g.refs.reduce((m, r) => m + r.hits.length, 0),
+    0,
+  );
+  const limit = 100;
+  const shown = groupList.slice(0, limit);
+
+  const html = shown.map(buildRefGroupCard).join("");
+  container.innerHTML =
+    html +
+    (groupList.length > limit
+      ? `<p class="hint">Showing first ${limit} of ${groupList.length} reference groups (${totalHits.toLocaleString()} total hits) – refine your search to narrow results.</p>`
+      : "");
+}
+
+/** Build HTML for a reference group (header + nested refs + hits). */
+function buildRefGroupCard(group) {
+  const refsHtml = group.refs.map((r) => {
+    const hitsHtml = r.hits.map((h) => {
+      const video = videosData.videos[h.video_id];
+      if (!video) return "";
+      const videoUrl = `https://www.youtube.com/watch?v=${esc(h.video_id)}`;
+      const tsUrl = `${videoUrl}&t=${h.timestamp}`;
+      const timeStr = formatTime(h.timestamp);
+      const title = esc(video.title || h.video_id);
+      const snippetHtml = h.snippet
+        ? `<span class="snippet">&ldquo;${boldRef(esc(h.snippet), r.ref)}&rdquo;</span>`
+        : "";
+      return `<a href="${tsUrl}" target="_blank" rel="noopener noreferrer" class="hit-line ref-hit-line">
+        <span class="ref-hit-title">${title}</span>
+        <span class="timestamp">⏱ ${timeStr}</span>
+        ${snippetHtml}
+      </a>`;
+    }).join("");
+    return `<div class="ref-entry">
+      <div class="ref-entry-header"><span class="hit-ref">${esc(r.ref)}</span>
+        <span class="hit-count">${r.hits.length} match${r.hits.length === 1 ? "" : "es"}</span>
+      </div>
+      <div class="hit-lines">${hitsHtml}</div>
+    </div>`;
+  }).join("");
+
+  return `<div class="ref-group-card">
+    <div class="ref-group-header">${esc(group.label)}</div>
+    ${refsHtml}
+  </div>`;
 }
 
 /* ── Card builder ───────────────────────────────────────────────── */
@@ -366,25 +581,6 @@ function esc(str) {
 
 /** Comparison function for sorting canonical scripture references in Bible order. */
 function compareScriptureRefs(a, b) {
-  const BOOK_ORDER = [
-    "Genesis","Exodus","Leviticus","Numbers","Deuteronomy",
-    "Joshua","Judges","Ruth",
-    "1 Samuel","2 Samuel","1 Kings","2 Kings",
-    "1 Chronicles","2 Chronicles",
-    "Ezra","Nehemiah","Esther","Job","Psalms","Proverbs",
-    "Ecclesiastes","Song of Solomon",
-    "Isaiah","Jeremiah","Lamentations","Ezekiel","Daniel",
-    "Hosea","Joel","Amos","Obadiah","Jonah","Micah",
-    "Nahum","Habakkuk","Zephaniah","Haggai","Zechariah","Malachi",
-    "Matthew","Mark","Luke","John","Acts","Romans",
-    "1 Corinthians","2 Corinthians","Galatians","Ephesians",
-    "Philippians","Colossians",
-    "1 Thessalonians","2 Thessalonians",
-    "1 Timothy","2 Timothy","Titus","Philemon",
-    "Hebrews","James",
-    "1 Peter","2 Peter",
-    "1 John","2 John","3 John","Jude","Revelation",
-  ];
   // e.g. "Romans 8:28" → book="Romans", rest="8:28"
   const parse = (r) => {
     const m = r.match(/^(.+?)\s+(\d+:\d+(?:-\d+)?)$/);
