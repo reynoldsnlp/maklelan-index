@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -136,19 +137,29 @@ def main() -> None:
     index["references"] = {}
 
     videos = videos_data.get("videos", {})
+    total_videos = len(videos)
+    transcripts_found = 0
+    transcripts_unreadable = 0
     processed_count = 0
+    videos_with_refs = 0
+    videos_no_refs = 0
     ref_count = 0
+    book_counter: Counter[str] = Counter()
+
+    print(f"Found {total_videos} videos in videos.json.", flush=True)
 
     for vid_id, vid_record in videos.items():
         transcript_path = TRANSCRIPT_DIR / f"{vid_id}.json"
         if not transcript_path.exists():
             continue
+        transcripts_found += 1
 
         try:
             with open(transcript_path, encoding="utf-8") as f:
                 transcript = json.load(f)
         except Exception as exc:
             print(f"Warning: could not read transcript for {vid_id}: {exc}", flush=True)
+            transcripts_unreadable += 1
             continue
 
         refs = refs_from_transcript(transcript)
@@ -167,12 +178,16 @@ def main() -> None:
             )
             if not already:
                 bucket.append(entry)
+            book = canonical.rsplit(" ", 1)[0]
+            book_counter[book] += 1
 
         if refs:
             vid_record["processed"] = STATUS_YES
             ref_count += len(refs)
+            videos_with_refs += 1
         else:
             vid_record["processed"] = STATUS_NO_REFS
+            videos_no_refs += 1
 
         processed_count += 1
 
@@ -186,11 +201,29 @@ def main() -> None:
     write_sitemap()
     write_robots()
 
-    print(
-        f"Built index: {len(index['references'])} references "
-        f"({ref_count} occurrences) from {processed_count} transcripts.",
-        flush=True,
-    )
+    unique_refs = len(index["references"])
+    missing_transcripts = total_videos - transcripts_found
+
+    print("", flush=True)
+    print("=" * 60, flush=True)
+    print("Build summary", flush=True)
+    print("=" * 60, flush=True)
+    print(f"  Videos in videos.json:        {total_videos}", flush=True)
+    print(f"  Transcripts on disk:          {transcripts_found}", flush=True)
+    print(f"  Videos missing transcript:    {missing_transcripts}", flush=True)
+    print(f"  Transcripts unreadable:       {transcripts_unreadable}", flush=True)
+    print(f"  Transcripts processed:        {processed_count}", flush=True)
+    print(f"  Videos with >=1 reference:    {videos_with_refs}", flush=True)
+    print(f"  Videos with no references:    {videos_no_refs}", flush=True)
+    print(f"  Unique references:            {unique_refs}", flush=True)
+    print(f"  Total reference occurrences:  {ref_count}", flush=True)
+
+    if book_counter:
+        print("", flush=True)
+        print(f"References per book ({len(book_counter)} books):", flush=True)
+        width = max(len(b) for b in book_counter)
+        for book, count in sorted(book_counter.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"  {book.ljust(width)}  {count}", flush=True)
 
 
 if __name__ == "__main__":
