@@ -104,17 +104,80 @@ def _video_from_renderer(renderer: dict) -> dict | None:
     }
 
 
+def _video_from_lockup(lockup: dict) -> dict | None:
+    """Convert a ``lockupViewModel`` dict into a simplified video metadata dict.
+
+    YouTube migrated the channel video grid from ``videoRenderer`` to this
+    view-model format, which carries the same fields under different keys.
+    """
+    if lockup.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+        return None
+
+    video_id = lockup.get("contentId")
+    if not video_id:
+        return None
+
+    metadata = lockup.get("metadata", {}).get("lockupMetadataViewModel", {})
+    title = metadata.get("title", {}).get("content", "")
+
+    # View count and publish time share a row of free-form "metadata parts".
+    published = ""
+    view_count = 0
+    rows = (
+        metadata.get("metadata", {})
+        .get("contentMetadataViewModel", {})
+        .get("metadataRows", [])
+    )
+    for row in rows:
+        for part in row.get("metadataParts", []):
+            text = part.get("text", {}).get("content", "")  # e.g. "22K", "10h ago"
+            label = part.get("accessibilityLabel", "")
+            if "view" in label.lower() or "view" in text.lower():
+                view_count = _parse_short_view_count(text)
+            elif "ago" in text:
+                published = text
+
+    thumbnail_vm = lockup.get("contentImage", {}).get("thumbnailViewModel", {})
+
+    thumbnail = ""
+    sources = thumbnail_vm.get("image", {}).get("sources", [])
+    if sources:
+        thumbnail = sources[-1].get("url", "")
+
+    duration = ""
+    for overlay in thumbnail_vm.get("overlays", []):
+        badges = overlay.get("thumbnailBottomOverlayViewModel", {}).get("badges", [])
+        for badge in badges:
+            text = badge.get("thumbnailBadgeViewModel", {}).get("text", "")
+            if re.fullmatch(r"(?:\d+:)?\d+:\d{2}", text):  # skip "LIVE", "New" etc.
+                duration = text
+
+    return {
+        "id": video_id,
+        "title": title,
+        "published": published,
+        "thumbnail": thumbnail,
+        "duration": duration,
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+        "view_count": view_count,
+    }
+
+
 def _extract_from_item(item: dict) -> tuple[dict | None, str | None]:
     """Return (video_dict | None, continuation_token | None) from a grid item."""
     video = None
     token = None
 
-    renderer = (
-        item.get("richItemRenderer", {}).get("content", {}).get("videoRenderer")
-        or item.get("videoRenderer")
-    )
-    if renderer:
-        video = _video_from_renderer(renderer)
+    content = item.get("richItemRenderer", {}).get("content", {})
+
+    lockup = content.get("lockupViewModel") or item.get("lockupViewModel")
+    if lockup:
+        video = _video_from_lockup(lockup)
+    else:
+        # Legacy shape, still served by some surfaces.
+        renderer = content.get("videoRenderer") or item.get("videoRenderer")
+        if renderer:
+            video = _video_from_renderer(renderer)
 
     cont = item.get("continuationItemRenderer", {})
     if cont:
@@ -211,6 +274,13 @@ def fetch_all_videos(session, innertube_client) -> list[dict]:
         sys.exit(1)
 
     all_videos, continuation = parse_initial_video_grid(yt_data)
+    if not all_videos:
+        print(
+            "ERROR: No videos parsed from the channel page. YouTube's response "
+            "format has probably changed again - check _extract_from_item().",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     print(f"  {len(all_videos)} videos on first page.", flush=True)
 
     page = 1
